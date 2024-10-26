@@ -100,20 +100,20 @@ async def stats(_, message):
 async def start(client, message):
     buttons = ButtonMaker()
     buttons.url_button(
-        "OWNER BOT", "https://t.me/November"
+        "OWNER", "https://t.me/November"
     )
     buttons.url_button("GROUP MIRROR", "https://t.me/November2kMirror")
     reply_markup = buttons.build_menu(2)
     if await CustomFilters.authorized(client, message):
         start_string = f"""
-Bot ini dapat mencerminkan semua tautan|file|torrent Anda ke Google Drive atau rclone cloud atau ke telegram.
-Jenis /{BotCommands.HelpCommand} untuk mendapatkan daftar perintah yang tersedia
+Bot ini dapat mendownload semua tautan|file|torrent Anda ke Google Drive atau rclone cloud atau ke telegram.
+Ketik /{BotCommands.HelpCommand} untuk melihat daftar perintah yang tersedia.
 """
         await send_message(message, start_string, reply_markup)
     else:
         await send_message(
             message,
-            "Anda bukan pengguna authorize! Contact OWNER BOT untuk meminta akses.",
+            "Anda tidak memiliki akses untuk menggunakan bot ini! PM OWNER untuk meminta akses.",
             reply_markup,
         )
 
