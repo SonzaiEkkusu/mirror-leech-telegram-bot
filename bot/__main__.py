@@ -100,7 +100,7 @@ async def stats(_, message):
 async def start(client, message):
     buttons = ButtonMaker()
     buttons.url_button(
-        "Repo", "https://www.github.com/anasty17/mirror-leech-telegram-bot"
+        "Support Me", "https://t.me/November2kLab/4"
     )
     buttons.url_button("Owner Bot", "https://t.me/November2k")
     reply_markup = buttons.build_menu(2)
