@@ -24,7 +24,7 @@ Type /{BotCommands.HelpCommand} to get a list of available commands
     else:
         await send_message(
             message,
-            "This bot can mirror from links|tgfiles|torrents|nzb|rclone-cloud to any rclone cloud, Google Drive or to telegram.\n\n⚠️ You Are not authorized user! Deploy your own mirror-leech bot",
+            "This bot can mirror from links|tgfiles|torrents|nzb|rclone-cloud to any rclone cloud, Google Drive or to telegram.\n\n⚠️ You Are not authorized user!",
             reply_markup,
         )
 
