@@ -318,7 +318,7 @@ class TaskListener(TaskConfig):
         msg = f"<b>cc: </b>{self.tag}\n<b>Size: </b>{get_readable_file_size(self.size)}"
         LOGGER.info(f"Task Done: {self.name}")
         if self.is_leech:
-            msg += f"\n<b>Total Files: </b>{folders}"
+            msg += f"\n<b>Total Files: </b>{folders}\n"
             if mime_type != 0:
                 msg += f"\n<b>Corrupted Files: </b>{mime_type}\n"
             if not files:
