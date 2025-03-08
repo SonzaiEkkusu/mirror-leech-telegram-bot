@@ -315,13 +315,12 @@ class TaskListener(TaskConfig):
             and Config.DATABASE_URL
         ):
             await database.rm_complete_task(self.message.link)
-        msg = f"<b>Status: </b><code>Success Upload</code>\n<b>Size: </b>{get_readable_file_size(self.size)}"
+        msg = f"<b>cc: </b>{self.tag}\n<b>Size: </b>{get_readable_file_size(self.size)}"
         LOGGER.info(f"Task Done: {self.name}")
         if self.is_leech:
             msg += f"\n<b>Total Files: </b>{folders}"
             if mime_type != 0:
-                msg += f"\n<b>Corrupted Files: </b>{mime_type}"
-            msg += f"\n<b>cc: </b>{self.tag}\n\n"
+                msg += f"\n<b>Corrupted Files: </b>{mime_type}\n"
             if not files:
                 await send_message(self.message, msg)
             else:
