@@ -390,7 +390,7 @@ class TelegramUploader:
                     thumb = None
                 self._sent_msg = await self._sent_msg.reply_video(
                     video=self._up_path,
-                    quote=True,
+                    quote=False,
                     caption=cap_mono,
                     duration=duration,
                     width=width,
