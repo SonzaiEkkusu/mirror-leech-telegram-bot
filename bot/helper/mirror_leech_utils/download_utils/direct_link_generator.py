@@ -1,3 +1,4 @@
+import re
 from cloudscraper import create_scraper
 from hashlib import sha256
 from http.cookiejar import MozillaCookieJar
@@ -770,75 +771,37 @@ def uploadee(url):
     else:
         raise DirectDownloadLinkException("ERROR: Direct Link not found")
 
-API_BASE = "https://terabox-v2.sonzaixlab.workers.dev"
-
-def _extract_short_code(raw_url: str) -> str | None:
-    """Ambil short code Terabox dari berbagai bentuk URL/kode mentah."""
-    if not raw_url:
-        return None
-
-    url = str(raw_url).strip()
-
-    # 1) Kalau user cuma kasih kode mentah
-    if re.fullmatch(r"[A-Za-z0-9_-]+", url):
-        return url
-
-    # 2) Coba ambil dari path '/s/<kode>'
-    path = urlparse(url).path
-    m = re.search(r"/s/([A-Za-z0-9_-]+)", path)
-    if m:
-        return m.group(1)
-
-    # 3) Coba dari query param (?surl= / ?shorturl=)
-    qs = parse_qs(urlparse(url).query)
-    for k in ("surl", "shorturl"):
-        if k in qs and qs[k]:
-            cand = qs[k][0]
-            if re.fullmatch(r"[A-Za-z0-9_-]+", cand):
-                return cand
-
-    return None
-
-
 def terabox(url: str, *, prefer_proxy: bool = True):
     if "/file/" in url:
         return url.strip()
 
-    code = _extract_short_code(url)
-    if not code:
-        raise DirectDownloadLinkException("ERROR: Short URL tidak valid (tidak ketemu).")
+    # ambil kode setelah /s/<kode>
+    m = re.search(r"/s/([A-Za-z0-9_-]+)", url)
+    if not m:
+        raise Exception("ERROR: Short URL tidak valid (tidak ketemu pola /s/<kode>).")
+    code = m.group(1)
 
-    api_url = f"{API_BASE}/?shorturl={quote(code)}"
+    api_url = f"https://terabox-v2.sonzaixlab.workers.dev/?shorturl={quote(code)}"
 
     with Session() as session:
-        resp = session.get(api_url, headers={"User-Agent": user_agent}, timeout=30)
-        resp.raise_for_status()
-        data = resp.json()
+        req = session.get(api_url, headers={"User-Agent": user_agent}).json()
 
-    if data.get("status") != "success" or "result" not in data:
-        raise DirectDownloadLinkException("ERROR: Respons API tidak valid.")
+    if req.get("status") != "success":
+        raise Exception("ERROR: File tidak ditemukan!")
 
-    files = data["result"]
     details = {"contents": [], "title": "", "total_size": 0}
-
-    for f in files:
-        chosen = f.get("proxy_download") if prefer_proxy else f.get("download_url")
-        if not chosen:
-            chosen = f.get("download_url") or f.get("proxy_download")
-
+    for f in req["result"]:
+        url_out = f.get("proxy_download") if prefer_proxy else f.get("download_url")
         details["contents"].append({
-            "filename": f.get("filename"),
-            "url": chosen,
-            "thumbnail": f.get("thumbnail"),
+            "filename": f["filename"],
+            "url": url_out,
         })
-
         try:
-            details["total_size"] += int(f.get("size", 0))
-        except (TypeError, ValueError):
+            details["total_size"] += int(f["size"])
+        except:
             pass
 
-    details["title"] = files[0].get("filename", "Terabox Files")
-
+    details["title"] = req["result"][0]["filename"]
     if len(details["contents"]) == 1:
         return details["contents"][0]["url"]
     return details
