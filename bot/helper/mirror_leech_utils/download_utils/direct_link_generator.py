@@ -802,7 +802,7 @@ def terabox(url_or_shortid: str):
 
     for it in data["result"]:
         filename = it.get("filename", "unknown")
-        url = it.get("download_url") or it.get("proxy_download")
+        url = it.get("proxy_download") or it.get("download_url")
         size = int(it.get("size", "0"))
         details["contents"].append({
             "path": "",
