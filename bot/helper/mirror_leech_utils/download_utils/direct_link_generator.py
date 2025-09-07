@@ -776,78 +776,60 @@ def _extract_short_code(raw_url: str) -> str | None:
     """Ambil short code Terabox dari berbagai bentuk URL/kode mentah."""
     if not raw_url:
         return None
-    # bersihin spasi/newline dan decode %xx
-    url = unquote(str(raw_url).strip())
 
-    # 1) Kalau user cuma kirim KODE-nya saja (tanpa domain), validasi sederhana
-    #    Kode biasanya alnum + _ dan -
+    url = str(raw_url).strip()
+
+    # 1) Kalau user cuma kasih kode mentah
     if re.fullmatch(r"[A-Za-z0-9_-]+", url):
         return url
 
-    # 2) Coba dari path '/s/<kode>'
-    path = urlparse(url).path  # contoh: '/s/1rXUl6n3N_70bMlA_fVDMaA'
+    # 2) Coba ambil dari path '/s/<kode>'
+    path = urlparse(url).path
     m = re.search(r"/s/([A-Za-z0-9_-]+)", path)
     if m:
         return m.group(1)
 
     # 3) Coba dari query param (?surl= / ?shorturl=)
     qs = parse_qs(urlparse(url).query)
-    for k in ("surl", "shorturl", "shareid", "si"):  # tambah variasi yang kadang muncul
+    for k in ("surl", "shorturl"):
         if k in qs and qs[k]:
             cand = qs[k][0]
             if re.fullmatch(r"[A-Za-z0-9_-]+", cand):
                 return cand
 
-    # 4) Last resort: scan di seluruh string (berguna kalau ada embed aneh di log)
-    m2 = re.search(r"(?:/s/|[?&](?:surl|shorturl)=)([A-Za-z0-9_-]+)", url)
-    if m2:
-        return m2.group(1)
-
     return None
 
 
 def terabox(url: str, *, prefer_proxy: bool = True):
-    # 0) Kalau sudah direct '/file/' dari CDN TeraBox, balikin saja
-    if isinstance(url, str) and "/file/" in url:
+    if "/file/" in url:
         return url.strip()
 
     code = _extract_short_code(url)
     if not code:
-        raise DirectDownloadLinkException("ERROR: Short URL tidak valid (tidak ketemu /s/<kode> atau ?surl=).")
+        raise DirectDownloadLinkException("ERROR: Short URL tidak valid (tidak ketemu).")
 
     api_url = f"{API_BASE}/?shorturl={quote(code)}"
 
-    try:
-        with Session() as session:
-            resp = session.get(api_url, headers={"User-Agent": user_agent}, timeout=30)
-            resp.raise_for_status()
-            data = resp.json()
-    except Exception as e:
-        raise DirectDownloadLinkException(f"ERROR: {e.__class__.__name__}") from e
+    with Session() as session:
+        resp = session.get(api_url, headers={"User-Agent": user_agent}, timeout=30)
+        resp.raise_for_status()
+        data = resp.json()
 
-    if not isinstance(data, dict) or data.get("status") != "success" or "result" not in data:
-        raise DirectDownloadLinkException("ERROR: Respons API tidak valid atau status != success.")
+    if data.get("status") != "success" or "result" not in data:
+        raise DirectDownloadLinkException("ERROR: Respons API tidak valid.")
 
-    files = data.get("result") or []
-    if not files:
-        raise DirectDownloadLinkException("ERROR: Tidak ada file yang ditemukan.")
-
+    files = data["result"]
     details = {"contents": [], "title": "", "total_size": 0}
 
     for f in files:
-        filename = f.get("filename", "")
-        # utamakan proxy kalau prefer_proxy=True
         chosen = f.get("proxy_download") if prefer_proxy else f.get("download_url")
         if not chosen:
             chosen = f.get("download_url") or f.get("proxy_download")
 
         details["contents"].append({
-            "path": "",
-            "filename": filename,
+            "filename": f.get("filename"),
             "url": chosen,
             "thumbnail": f.get("thumbnail"),
-            "direct_url": f.get("download_url"),
-            "proxy_url": f.get("proxy_download"),
         })
 
         try:
@@ -855,7 +837,7 @@ def terabox(url: str, *, prefer_proxy: bool = True):
         except (TypeError, ValueError):
             pass
 
-    details["title"] = files[0].get("filename") or "Terabox Files"
+    details["title"] = files[0].get("filename", "Terabox Files")
 
     if len(details["contents"]) == 1:
         return details["contents"][0]["url"]
