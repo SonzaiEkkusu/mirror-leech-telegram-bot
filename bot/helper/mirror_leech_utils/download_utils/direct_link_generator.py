@@ -772,70 +772,50 @@ def uploadee(url):
     else:
         raise DirectDownloadLinkException("ERROR: Direct Link not found")
 
-class TeraboxAPIError(Exception):
-    """Kesalahan ketika memanggil API Terabox-SonzaixLab."""
 
-def _extract_shorturl(link: str) -> str:
-    """
-    Ambil kode short-url dari berbagai domain publik Terabox
-    (1024terabox.com, teraboxapp.com, dll).
+class DirectDownloadLinkException(Exception):
+    pass
 
-    Contoh:
-        https://1024terabox.com/s/1knHMkzMsYsLOOXrZR1V-HA   -> 1knHMkzMsYsLOOXrZR1V-HA
-    """
-    m = re.search(r"/s/([^/?#]+)", link)
-    if not m:
-        raise TeraboxAPIError("Link tidak valid atau tidak mengandung /s/<shorturl>")
-    return m.group(1)
+API_BASE = "https://terabox-v2.sonzaixlab.workers.dev/?shorturl="
 
-def terabox_sonzaix(link: str) -> dict:
-    """
-    • Terima link publik Terabox (format /s/<shorturl>)
-    • Panggil endpoint:
-        https://terabox-v2.sonzaixlab.workers.dev/?shorturl=<shorturl>
-    • Kembalikan dict dengan kunci:
-        - status
-        - contents  : list[dict]  -> filename, size(int), download_url, proxy_download
-        - total_size
-        - title     : nama file/folder pertama
-    """
-    shorturl = _extract_shorturl(link)
-    api = (
-        "https://terabox-v2.sonzaixlab.workers.dev/"
-        f"?shorturl={shorturl}"
-    )
+def _extract_shortid(url: str) -> str:
+    # contoh: https://1024terabox.com/s/1knHMkzMsYsLOOXrZR1V-HA -> 1knHMkzMsYsLOOXrZR1V-HA
+    p = urlparse(url)
+    parts = p.path.strip("/").split("/")
+    if len(parts) >= 2 and parts[0] == "s":
+        return parts[1]
+    # kalau user langsung kasih shortid
+    return url
 
+def terabox(url_or_shortid: str):
+    shortid = _extract_shortid(url_or_shortid)
     try:
-        resp = requests.get(api, timeout=30)
-        data = resp.json()
+        r = requests.get(API_BASE + shortid, timeout=15)
+        data = r.json()
     except Exception as e:
-        raise TeraboxAPIError(f"Gagal memanggil API: {e!r}")
+        raise DirectDownloadLinkException(f"ERROR: {e.__class__.__name__}") from e
 
-    if data.get("status") != "success":
-        raise TeraboxAPIError("Status API bukan success")
+    if data.get("status") != "success" or not data.get("result"):
+        raise DirectDownloadLinkException("ERROR: File not found!")
 
-    results = data["result"]
+    details = {"contents": [], "title": "", "total_size": 0}
 
-    contents = []
-    total_size = 0
+    for it in data["result"]:
+        filename = it.get("filename", "unknown")
+        url = it.get("download_url") or it.get("proxy_download")
+        size = int(it.get("size", "0"))
+        details["contents"].append({
+            "path": "",
+            "filename": filename,
+            "url": url,
+        })
+        details["total_size"] += size
 
-    for item in results:
-        contents.append(
-            {
-                "filename": item["filename"],
-                "size": int(item["size"]),
-                # pilih salah-satu sesuai preferensi
-                "url": item["proxy_download"] or item["download_url"],
-            }
-        )
-        total_size += int(item["size"])
+    details["title"] = details["contents"][0]["filename"]
 
-    return {
-        "status": "success",
-        "title": contents[0]["filename"] if contents else "",
-        "total_size": total_size,
-        "contents": contents,
-    }
+    if len(details["contents"]) == 1:
+        return details["contents"][0]["url"]
+    return details
 
 def filepress(url):
     try:
