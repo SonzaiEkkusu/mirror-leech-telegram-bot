@@ -1,4 +1,5 @@
 import re
+import requests
 from cloudscraper import create_scraper
 from hashlib import sha256
 from http.cookiejar import MozillaCookieJar
@@ -771,40 +772,70 @@ def uploadee(url):
     else:
         raise DirectDownloadLinkException("ERROR: Direct Link not found")
 
-def terabox(url: str, *, prefer_proxy: bool = True):
-    if "/file/" in url:
-        return url.strip()
+class TeraboxAPIError(Exception):
+    """Kesalahan ketika memanggil API Terabox-SonzaixLab."""
 
-    # ambil kode setelah /s/<kode>
-    m = re.search(r"/s/([A-Za-z0-9_-]+)", url)
+def _extract_shorturl(link: str) -> str:
+    """
+    Ambil kode short-url dari berbagai domain publik Terabox
+    (1024terabox.com, teraboxapp.com, dll).
+
+    Contoh:
+        https://1024terabox.com/s/1knHMkzMsYsLOOXrZR1V-HA   -> 1knHMkzMsYsLOOXrZR1V-HA
+    """
+    m = re.search(r"/s/([^/?#]+)", link)
     if not m:
-        raise Exception("ERROR: Short URL tidak valid (tidak ketemu pola /s/<kode>).")
-    code = m.group(1)
+        raise TeraboxAPIError("Link tidak valid atau tidak mengandung /s/<shorturl>")
+    return m.group(1)
 
-    api_url = f"https://terabox-v2.sonzaixlab.workers.dev/?shorturl={quote(code)}"
+def terabox_sonzaix(link: str) -> dict:
+    """
+    • Terima link publik Terabox (format /s/<shorturl>)
+    • Panggil endpoint:
+        https://terabox-v2.sonzaixlab.workers.dev/?shorturl=<shorturl>
+    • Kembalikan dict dengan kunci:
+        - status
+        - contents  : list[dict]  -> filename, size(int), download_url, proxy_download
+        - total_size
+        - title     : nama file/folder pertama
+    """
+    shorturl = _extract_shorturl(link)
+    api = (
+        "https://terabox-v2.sonzaixlab.workers.dev/"
+        f"?shorturl={shorturl}"
+    )
 
-    with Session() as session:
-        req = session.get(api_url, headers={"User-Agent": user_agent}).json()
+    try:
+        resp = requests.get(api, timeout=30)
+        data = resp.json()
+    except Exception as e:
+        raise TeraboxAPIError(f"Gagal memanggil API: {e!r}")
 
-    if req.get("status") != "success":
-        raise Exception("ERROR: File tidak ditemukan!")
+    if data.get("status") != "success":
+        raise TeraboxAPIError("Status API bukan success")
 
-    details = {"contents": [], "title": "", "total_size": 0}
-    for f in req["result"]:
-        url_out = f.get("proxy_download") if prefer_proxy else f.get("download_url")
-        details["contents"].append({
-            "filename": f["filename"],
-            "url": url_out,
-        })
-        try:
-            details["total_size"] += int(f["size"])
-        except:
-            pass
+    results = data["result"]
 
-    details["title"] = req["result"][0]["filename"]
-    if len(details["contents"]) == 1:
-        return details["contents"][0]["url"]
-    return details
+    contents = []
+    total_size = 0
+
+    for item in results:
+        contents.append(
+            {
+                "filename": item["filename"],
+                "size": int(item["size"]),
+                # pilih salah-satu sesuai preferensi
+                "url": item["proxy_download"] or item["download_url"],
+            }
+        )
+        total_size += int(item["size"])
+
+    return {
+        "status": "success",
+        "title": contents[0]["filename"] if contents else "",
+        "total_size": total_size,
+        "contents": contents,
+    }
 
 def filepress(url):
     try:
