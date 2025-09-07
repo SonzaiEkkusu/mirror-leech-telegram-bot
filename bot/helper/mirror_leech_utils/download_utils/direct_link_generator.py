@@ -771,32 +771,68 @@ def uploadee(url):
         raise DirectDownloadLinkException("ERROR: Direct Link not found")
 
 
-def terabox(url):
+API_BASE = "https://terabox-v2.sonzaixlab.workers.dev"
+def _extract_short_code(url: str) -> str | None:
+    try:
+        path = urlparse(url).path
+        m = re.search(r"/s/([^/?#]+)", path)
+        return m.group(1) if m else None
+    except Exception:
+        return None
+
+def terabox(url: str, *, prefer_proxy: bool = True):
     if "/file/" in url:
         return url
-    api_url = f"https://wdzone-terabox-api.vercel.app/api?url={quote(url)}"
+
+    code = _extract_short_code(url)
+    if not code:
+        raise DirectDownloadLinkException("ERROR: Short URL tidak valid (tidak ketemu pola /s/<kode>).")
+
+    api_url = f"{API_BASE}/?shorturl={quote(code)}"
+
     try:
         with Session() as session:
-            req = session.get(api_url, headers={"User-Agent": user_agent}).json()
+            resp = session.get(api_url, headers={"User-Agent": user_agent}, timeout=30)
+            resp.raise_for_status()
+            data = resp.json()
     except Exception as e:
         raise DirectDownloadLinkException(f"ERROR: {e.__class__.__name__}") from e
 
+    if not isinstance(data, dict) or data.get("status") != "success" or "result" not in data:
+        raise DirectDownloadLinkException("ERROR: Respons API tidak valid atau status != success.")
+
+    files = data.get("result", [])
+    if not files:
+        raise DirectDownloadLinkException("ERROR: Tidak ada file yang ditemukan.")
+
     details = {"contents": [], "title": "", "total_size": 0}
-    if "✅ Status" not in req:
-        raise DirectDownloadLinkException("ERROR: File not found!")
-    for data in req["📜 Extracted Info"]:
+
+    for f in files:
+        filename = f.get("filename", "")
+        download_url = f.get("proxy_download") if prefer_proxy else f.get("download_url")
+        if not download_url:
+            download_url = f.get("download_url") or f.get("proxy_download")
+
         item = {
             "path": "",
-            "filename": data["📂 Title"],
-            "url": data["🔽 Direct Download Link"],
+            "filename": filename,
+            "url": download_url,
+            "thumbnail": f.get("thumbnail"),
+            "direct_url": f.get("download_url"),
+            "proxy_url": f.get("proxy_download"),
         }
         details["contents"].append(item)
-        size = (data["📏 Size"]).replace(" ", "")
-        size = speed_string_to_bytes(size)
-        details["total_size"] += size
-    details["title"] = req["📜 Extracted Info"][0]["📂 Title"]
+
+        try:
+            details["total_size"] += int(f.get("size", 0))
+        except (TypeError, ValueError):
+            pass
+
+    details["title"] = files[0].get("filename") or "Terabox Files"
+
     if len(details["contents"]) == 1:
         return details["contents"][0]["url"]
+
     return details
 
 
