@@ -770,34 +770,53 @@ def uploadee(url):
     else:
         raise DirectDownloadLinkException("ERROR: Direct Link not found")
 
-
 API_BASE = "https://terabox-v2.sonzaixlab.workers.dev"
 
-def _extract_short_code(url: str) -> str | None:
-    """
-    Ambil short code setelah '/s/' dari URL 1024terabox/terabox.
-    Contoh: https://1024terabox.com/s/1knH...-HA -> 1knH...-HA
-    """
-    try:
-        path = urlparse(url).path
-        m = re.search(r"/s/([^/?#]+)", path)
-        return m.group(1) if m else None
-    except Exception:
+def _extract_short_code(raw_url: str) -> str | None:
+    """Ambil short code Terabox dari berbagai bentuk URL/kode mentah."""
+    if not raw_url:
         return None
+    # bersihin spasi/newline dan decode %xx
+    url = unquote(str(raw_url).strip())
 
-def terabox(url: str, *, prefer_proxy: bool = False):
-    # 1) Kalau sudah direct '/file/', balikin saja
-    if "/file/" in url:
+    # 1) Kalau user cuma kirim KODE-nya saja (tanpa domain), validasi sederhana
+    #    Kode biasanya alnum + _ dan -
+    if re.fullmatch(r"[A-Za-z0-9_-]+", url):
         return url
 
-    # 2) Coba ambil short code
+    # 2) Coba dari path '/s/<kode>'
+    path = urlparse(url).path  # contoh: '/s/1rXUl6n3N_70bMlA_fVDMaA'
+    m = re.search(r"/s/([A-Za-z0-9_-]+)", path)
+    if m:
+        return m.group(1)
+
+    # 3) Coba dari query param (?surl= / ?shorturl=)
+    qs = parse_qs(urlparse(url).query)
+    for k in ("surl", "shorturl", "shareid", "si"):  # tambah variasi yang kadang muncul
+        if k in qs and qs[k]:
+            cand = qs[k][0]
+            if re.fullmatch(r"[A-Za-z0-9_-]+", cand):
+                return cand
+
+    # 4) Last resort: scan di seluruh string (berguna kalau ada embed aneh di log)
+    m2 = re.search(r"(?:/s/|[?&](?:surl|shorturl)=)([A-Za-z0-9_-]+)", url)
+    if m2:
+        return m2.group(1)
+
+    return None
+
+
+def terabox(url: str, *, prefer_proxy: bool = True):
+    # 0) Kalau sudah direct '/file/' dari CDN TeraBox, balikin saja
+    if isinstance(url, str) and "/file/" in url:
+        return url.strip()
+
     code = _extract_short_code(url)
     if not code:
-        raise DirectDownloadLinkException("ERROR: Short URL tidak valid (tidak ketemu pola /s/<kode>).")
+        raise DirectDownloadLinkException("ERROR: Short URL tidak valid (tidak ketemu /s/<kode> atau ?surl=).")
 
     api_url = f"{API_BASE}/?shorturl={quote(code)}"
 
-    # 3) Panggil API
     try:
         with Session() as session:
             resp = session.get(api_url, headers={"User-Agent": user_agent}, timeout=30)
@@ -806,50 +825,41 @@ def terabox(url: str, *, prefer_proxy: bool = False):
     except Exception as e:
         raise DirectDownloadLinkException(f"ERROR: {e.__class__.__name__}") from e
 
-    # 4) Validasi struktur respons
     if not isinstance(data, dict) or data.get("status") != "success" or "result" not in data:
         raise DirectDownloadLinkException("ERROR: Respons API tidak valid atau status != success.")
 
-    files = data.get("result", [])
+    files = data.get("result") or []
     if not files:
         raise DirectDownloadLinkException("ERROR: Tidak ada file yang ditemukan.")
 
-    # 5) Susun 'details' seperti fungsi kamu
     details = {"contents": [], "title": "", "total_size": 0}
 
     for f in files:
         filename = f.get("filename", "")
-        download_url = f.get("proxy_download") if prefer_proxy else f.get("download_url")
-        if not download_url:
-            # fallback kalau proxy kosong tapi prefer_proxy=True
-            download_url = f.get("download_url") or f.get("proxy_download")
+        # utamakan proxy kalau prefer_proxy=True
+        chosen = f.get("proxy_download") if prefer_proxy else f.get("download_url")
+        if not chosen:
+            chosen = f.get("download_url") or f.get("proxy_download")
 
-        item = {
+        details["contents"].append({
             "path": "",
             "filename": filename,
-            "url": download_url,
-            # bonus: kalau mau simpan thumb/proxy juga
+            "url": chosen,
             "thumbnail": f.get("thumbnail"),
             "direct_url": f.get("download_url"),
             "proxy_url": f.get("proxy_download"),
-        }
-        details["contents"].append(item)
+        })
 
-        # size di respons contoh adalah string angka byte
         try:
             details["total_size"] += int(f.get("size", 0))
         except (TypeError, ValueError):
             pass
 
-    # Judul: pakai nama file pertama atau "Terabox Files"
     details["title"] = files[0].get("filename") or "Terabox Files"
 
-    # 6) Bila hanya 1 file, kembalikan langsung URL-nya
     if len(details["contents"]) == 1:
         return details["contents"][0]["url"]
-
     return details
-
 
 def filepress(url):
     try:
