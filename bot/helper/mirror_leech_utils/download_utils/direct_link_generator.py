@@ -785,7 +785,7 @@ def _extract_short_code(url: str) -> str | None:
     except Exception:
         return None
 
-def terabox(url: str, *, prefer_proxy: bool = True):
+def terabox(url: str, *, prefer_proxy: bool = False):
     # 1) Kalau sudah direct '/file/', balikin saja
     if "/file/" in url:
         return url
